@@ -1,3 +1,7 @@
+# Fork of lilliput
+The Discord Lilliput repo has been forked to provide a bit more ease of use with using the library as a dependency
+in a golang project.
+
 # lilliput
 
 [lilliput](https://en.wiktionary.org/wiki/lilliputian#Adjective) resizes images in Go.
