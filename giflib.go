@@ -12,10 +12,17 @@ import (
 )
 
 type gifDecoder struct {
-	decoder    C.giflib_decoder
-	mat        C.opencv_mat
-	buf        []byte
-	frameIndex int
+	decoder           C.giflib_decoder
+	mat               C.opencv_mat
+	buf               []byte
+	frameIndex        int
+	loopCount         int
+	frameCount        int
+	animationInfoRead bool
+	bgRed             uint8
+	bgGreen           uint8
+	bgBlue            uint8
+	bgAlpha           uint8
 }
 
 type gifEncoder struct {
@@ -67,7 +74,7 @@ func (d *gifDecoder) Header() (*ImageHeader, error) {
 		height:        int(C.giflib_decoder_get_height(d.decoder)),
 		pixelType:     PixelType(C.CV_8UC4),
 		orientation:   OrientationTopLeft,
-		numFrames:     int(C.giflib_decoder_get_num_frames(d.decoder)),
+		numFrames:     d.FrameCount(),
 		contentLength: len(d.buf),
 	}, nil
 }
@@ -110,11 +117,34 @@ func (d *gifDecoder) Duration() time.Duration {
 }
 
 func (d *gifDecoder) BackgroundColor() uint32 {
-	return 0x00FFFFFF // use a non-opaque alpha value so we can see the background if needed
+	d.readAnimationInfo()
+	return uint32(d.bgRed)<<16 | uint32(d.bgGreen)<<8 | uint32(d.bgBlue) | uint32(d.bgAlpha)<<24
+}
+
+// readAnimationInfo reads the GIF info from the decoder and caches it
+// this involves reading extension blocks and is relatively expensive
+// so we only do it once when we need it
+func (d *gifDecoder) readAnimationInfo() {
+	if !d.animationInfoRead {
+		info := C.giflib_decoder_get_animation_info(d.decoder)
+		d.loopCount = int(info.loop_count)
+		d.frameCount = int(info.frame_count)
+		d.animationInfoRead = true
+		d.bgRed = uint8(info.bg_red)
+		d.bgGreen = uint8(info.bg_green)
+		d.bgBlue = uint8(info.bg_blue)
+		d.bgAlpha = uint8(info.bg_alpha)
+	}
 }
 
 func (d *gifDecoder) LoopCount() int {
-	return 0 // loop indefinitely
+	d.readAnimationInfo()
+	return d.loopCount
+}
+
+func (d *gifDecoder) FrameCount() int {
+	d.readAnimationInfo()
+	return d.frameCount
 }
 
 func (d *gifDecoder) DecodeTo(f *Framebuffer) error {
@@ -151,7 +181,7 @@ func (d *gifDecoder) DecodeTo(f *Framebuffer) error {
 	}
 	f.duration = time.Duration(C.giflib_decoder_get_prev_frame_delay(d.decoder)) * 10 * time.Millisecond
 	f.blend = NoBlend
-	f.dispose = DisposeToBackgroundColor
+	f.dispose = DisposeMethod(C.giflib_decoder_get_prev_frame_disposal(d.decoder))
 	f.xOffset = 0
 	f.yOffset = 0
 	d.frameIndex++
